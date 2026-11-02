@@ -1,0 +1,101 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RiskLens: Combined Risk Score</title><style>
+:root{--bg:#f6f8fa;--card:#fff;--tx:#1b2430;--mu:#5b6776;--bd:#dde3ea;--hi:#d64545;--me:#d98e1f;--lo:#2f9163;--ac:#2563eb;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#10151c;--card:#19212b;--tx:#e7edf4;--mu:#9aa7b6;--bd:#2a3541;color-scheme:dark}}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,sans-serif;padding:14px;max-width:900px;margin:auto}
+.warn{background:#fff3cd;color:#5c4400;border-radius:8px;padding:8px 10px;font-size:12px;margin-bottom:12px}
+h1{font-size:20px;margin:0}h2{font-size:15px;margin:18px 0 8px}.mu{color:var(--mu);font-size:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}label{font-size:12px;color:var(--mu);display:block}
+select,input[type=number],input[type=text]{width:100%;box-sizing:border-box;padding:6px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx);font:inherit}
+button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:8px 12px;margin:4px 6px 4px 0;cursor:pointer;font:inherit}button.g{background:var(--mu)}
+.pill{color:#fff;border-radius:99px;padding:2px 10px;font-size:13px}.High{background:var(--hi)}.Medium{background:var(--me)}.Low{background:var(--lo)}
+.big{font-size:38px;font-weight:700;line-height:1}.bw{background:var(--bd);border-radius:6px;height:10px;min-width:80px}.bw i{display:block;height:10px;border-radius:6px}
+.sc{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--bd);white-space:nowrap}td.w{white-space:normal;min-width:180px}
+.tag{font-size:11px;border:1px solid var(--bd);border-radius:6px;padding:1px 6px;color:var(--mu)}.fm div{margin:3px 0}
+</style></head><body>
+<div class="warn">Student prototype. The score for each disease uses assumed, guideline-style weights, not weights trained on data. Decision support only, not a diagnosis. Care teams make the final decision.</div>
+<h1>RiskLens: Combined Risk Score</h1><div class="mu">One overall score for a person with more than one condition (sugar, blood pressure, heart attack, stroke)</div>
+
+<h2>Add a dataset (optional)</h2><div class="card"><input type="file" id="f" accept=".csv"> <button class="g" id="smp">Use sample dataset (synthetic)</button>
+<div class="mu" id="mp" style="margin-top:6px">Upload a CSV of people, for example the Kaggle heart or Pima diabetes file. Columns are matched by name, anything missing gets a neutral default, and nothing leaves your browser. Everyone is scored and ranked in the worklist below.</div></div>
+<h2>1. Enter the person’s details</h2><div class="card">
+<div class="mu">Quick examples</div><button class="g" data-p="0">Healthy person</button><button class="g" data-p="1">Sugar + BP</button><button class="g" data-p="2">Sugar + BP + heart attack history</button>
+<div class="grid" id="fm" style="margin-top:8px"></div>
+<div class="mu" style="margin-top:8px">Already diagnosed</div><div class="grid" id="dx"></div></div>
+
+<h2>2. Risk for each disease</h2><div class="card sc"><table id="dt"></table></div>
+
+<h2>3. Overall score</h2><div class="card"><div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap"><div class="big" id="ov">--</div><div id="tr"></div></div>
+<div class="bw" style="margin:8px 0"><i id="ob"></i></div><div id="fx" class="mu" style="font-size:13px;line-height:1.6"></div>
+<div class="grid" style="margin-top:8px"><div><label>Name to save</label><input type="text" id="nm" placeholder="Person name"></div></div><button id="sv">Save to worklist</button></div>
+
+<h2>4. Care-team worklist</h2><div class="card"><div id="tc"></div><div style="display:flex;gap:2px;align-items:flex-end;height:44px;margin:8px 0" id="hist"></div><div class="mu">Overall score spread (each bar is 10 points, 0% to 100%)</div><div class="grid" style="margin-top:6px"><div><label>Search name or condition</label><input type="text" id="q" placeholder="search"></div></div></div>
+<div class="card sc"><table id="wl"></table><button class="g" id="more" style="display:none">Show 25 more</button><div class="mu" id="rc"></div><div class="mu">Tiers: High 50% or more, Medium 25% to 49%, Low below 25%.</div></div>
+
+<script>
+const $=i=>document.getElementById(i),c0=x=>Math.max(0,x),sg=z=>1/(1+Math.exp(-z));
+const F=[["age","Age",56],["sex","Sex","s"],["glu","Fasting sugar (mg/dl)",126],["sbp","BP top number",140],["dbp","BP bottom number",90],["chol","Cholesterol (mg/dl)",230],["bmi","BMI",29],["hr","Resting heart rate",78],["smk","Smoker","y"],["ina","Low physical activity","y"],["ang","Chest pain on exertion","y"],["afib","Irregular heartbeat (ECG)","y"]];
+const DX=[["dxd","Diabetes (sugar)"],["dxb","High blood pressure"],["dxh","Heart disease or past heart attack"],["dxs","Past stroke"]];
+const yn='<option value="0">No</option><option value="1">Yes</option>';
+$("fm").innerHTML=F.map(f=>`<div><label>${f[1]}</label>`+(f[2]=="s"?'<select id="sex"><option value="1">Male</option><option value="0">Female</option></select>':f[2]=="y"?`<select id="${f[0]}">${yn}</select>`:`<input type="number" id="${f[0]}" value="${f[2]}">`)+"</div>").join("");
+$("dx").innerHTML=DX.map(d=>`<div><label>${d[1]}</label><select id="${d[0]}">${yn}</select></div>`).join("");
+const P=[{age:35,sex:0,glu:88,sbp:112,dbp:72,chol:170,bmi:22,hr:64,smk:0,ina:0,ang:0,afib:0,dxd:0,dxb:0,dxh:0,dxs:0},{age:48,sex:1,glu:118,sbp:138,dbp:88,chol:205,bmi:28,hr:74,smk:0,ina:1,ang:0,afib:0,dxd:1,dxb:1,dxh:0,dxs:0},{age:60,sex:1,glu:158,sbp:152,dbp:96,chol:250,bmi:31,hr:82,smk:1,ina:1,ang:1,afib:0,dxd:1,dxb:1,dxh:1,dxs:0}];
+const ids=F.map(f=>f[0]).concat(DX.map(d=>d[0])),val=()=>{const v={};ids.forEach(i=>v[i]=+$(i).value);return v};
+const tier=p=>p>=.5?"High":p>=.25?"Medium":"Low",col=p=>({High:"hi",Medium:"me",Low:"lo"})[tier(p)];
+function mk(base,t){const x=t.filter(a=>a[0]>.1).sort((a,b)=>b[0]-a[0]);return{r:sg(base+t.reduce((s,a)=>s+a[0],0)),why:x.slice(0,2).map(a=>a[1]).join(", ")}}
+function calc(v){const dm=v.dxd||v.glu>=126,male=v.sex;
+const bpT=Math.max(.06*c0(v.sbp-110),.08*c0(v.dbp-70)),bp=v.sbp+"/"+v.dbp;
+const D=[
+{n:"Diabetes (sugar)",w:1,fl:.5,dx:v.dxd,...mk(-3.5,[[.07*c0(v.glu-90),"high sugar ("+v.glu+")"],[.03*c0(v.age-35),"age"],[.06*c0(v.bmi-25),"overweight (BMI "+v.bmi+")"],[.3*v.ina,"low activity"]])},
+{n:"High blood pressure",w:.8,fl:.45,dx:v.dxb,...mk(-3.5,[[bpT,"high BP ("+bp+")"],[.025*c0(v.age-40),"age"],[.05*c0(v.bmi-25),"overweight"],[.3*v.ina,"low activity"]])},
+{n:"Heart attack",w:1.3,fl:.65,dx:v.dxh,...mk(-5,[[.045*c0(v.age-40),"age"],[.35*male,"male sex"],[.012*c0(v.chol-180),"high cholesterol ("+v.chol+")"],[.03*c0(v.sbp-120),"high BP"],[.9*v.smk,"smoking"],[.5*dm,"diabetes or high sugar"],[.9*v.ang,"chest pain on exertion"],[.02*c0(v.hr-75),"fast heart rate"],[.05*c0(v.bmi-25),"overweight"]])},
+{n:"Stroke",w:1.2,fl:.65,dx:v.dxs,...mk(-5.5,[[.05*c0(v.age-45),"age"],[.04*c0(v.sbp-120),"high BP"],[1*v.afib,"irregular heartbeat"],[.6*v.smk,"smoking"],[.5*dm,"diabetes or high sugar"]])}];
+D.forEach(d=>d.d=d.dx?Math.max(d.r,d.fl):d.r);
+const mx=Math.max(...D.map(d=>d.d)),top=D.find(d=>d.d==mx),wa=D.reduce((s,d)=>s+d.w*d.d,0)/D.reduce((s,d)=>s+d.w,0),cnt=D.filter(d=>d.dx||d.d>=.5).length,up=.06*c0(cnt-1),o=Math.min(1,.6*mx+.4*wa+up);
+return{D,mx,top,wa,cnt,up,o}}
+const pc=x=>Math.round(x*100)+"%";
+let DS=[],flt="All",q="",sk="o",sd=-1,lim=25,base=null;
+const row=(name,v)=>{const r=calc(v);return{name,o:r.o,v,ds:r.D.filter(d=>d.dx||d.d>=.3).map(d=>d.n+" "+pc(d.d)).join(", ")||"none"}};
+const saved=P.map((p,i)=>row(["Sample A (healthy)","Sample B (sugar + BP)","Sample C (sugar + BP + heart)"][i],p));
+function wlRender(){const L=saved.concat(DS),cnt={High:0,Medium:0,Low:0},hb=Array(10).fill(0);L.forEach(s=>{cnt[tier(s.o)]++;hb[Math.min(9,Math.floor(s.o*10))]++});
+$("tc").innerHTML=["All","High","Medium","Low"].map(k=>`<button data-t="${k}" class="${k==flt?"":"g"}">${k} ${k=="All"?L.length:cnt[k]}</button>`).join("");
+const hm=Math.max(...hb,1);$("hist").innerHTML=hb.map((n,i)=>`<div title="${i*10}-${i*10+9}%: ${n}" style="flex:1;height:${4+36*n/hm}px;background:var(--${col(i/10+.05)});border-radius:3px 3px 0 0"></div>`).join("");
+const R=L.filter(s=>(flt=="All"||tier(s.o)==flt)&&(!q||(s.name+" "+s.ds).toLowerCase().includes(q)));
+R.sort((a,b)=>sk=="name"?sd*a.name.localeCompare(b.name):sd*(a.o-b.o));
+$("wl").innerHTML='<tr><th>#</th><th data-s="name" style="cursor:pointer">Person</th><th data-s="o" style="cursor:pointer">Overall</th><th>Tier</th><th>Conditions and risks</th></tr>'+R.slice(0,lim).map((s,i)=>`<tr data-i="${L.indexOf(s)}" style="cursor:pointer"><td>${i+1}</td><td>${s.name}</td><td>${pc(s.o)}</td><td><span class="pill ${tier(s.o)}">${tier(s.o)}</span></td><td class="w">${s.ds}</td></tr>`).join("");
+$("more").style.display=R.length>lim?"inline-block":"none";$("rc").textContent=`Showing ${Math.min(lim,R.length)} of ${R.length}. Click a row to load that person above. Click Person or Overall to sort.`}
+$("tc").onclick=e=>{const t=e.target.dataset.t;if(t){flt=t;lim=25;wlRender()}};
+$("q").oninput=e=>{q=e.target.value.toLowerCase();lim=25;wlRender()};
+$("more").onclick=()=>{lim+=25;wlRender()};
+$("wl").onclick=e=>{const hd=e.target.closest("th[data-s]");if(hd){const s=hd.dataset.s;sd=sk==s?-sd:(s=="name"?1:-1);sk=s;wlRender();return}const tr=e.target.closest("tr[data-i]");if(tr){const s=saved.concat(DS)[+tr.dataset.i];ids.forEach(i=>$(i).value=s.v[i]);base={name:s.name,o:s.o};render();$("fm").scrollIntoView({behavior:"smooth",block:"center"})}};
+const NR=s=>s.toLowerCase().replace(/[^a-z0-9]/g,"");
+const AL={age:["age"],sex:["sex","gender"],glu:["glu","glucose","fastingsugar","bloodglucose"],sbp:["sbp","trestbps","trtbps","systolic","systolicbp","aphi"],dbp:["dbp","bloodpressure","diastolic","diastolicbp","aplo"],chol:["chol","cholesterol","totchol"],bmi:["bmi"],hr:["hr","heartrate","restinghr","restingheartrate"],smk:["smk","smoker","smoking","currentsmoker"],ina:["ina","inactive","physicalinactivity"],ang:["ang","exang","exng","angina"],afib:["afib"],dxd:["dxd","diabetes"],dxb:["dxb","hypertension","prevalenthyp","highbp"],dxh:["dxh","heartdisease","chd"],dxs:["dxs","stroke","prevalentstroke"]};
+const DEF={age:45,sex:0,glu:90,sbp:115,dbp:75,chol:180,bmi:24,hr:70,smk:0,ina:0,ang:0,afib:0,dxd:0,dxb:0,dxh:0,dxs:0},NZ=["age","glu","sbp","dbp","chol","bmi","hr"];
+const NMS={age:"age",sex:"sex",glu:"sugar",sbp:"BP top number",dbp:"BP bottom number",chol:"cholesterol",bmi:"BMI",hr:"heart rate",smk:"smoker",ina:"inactive",ang:"chest pain",afib:"irregular heartbeat",dxd:"diabetes",dxb:"high BP",dxh:"heart disease",dxs:"stroke"};
+function load(text,src){const L=text.trim().split(/\r?\n/),cl=s=>s.trim().replace(/^"|"$/g,""),h=L[0].split(",").map(cl),nh=h.map(NR),map={};
+Object.keys(AL).forEach(k=>{const j=nh.findIndex(x=>AL[k].includes(x));if(j>=0)map[k]=j});
+const idc=nh.findIndex(x=>["name","id","patientid","memberid","policyno","policynumber"].includes(x)),fb=nh.indexOf("fbs");
+if(!Object.keys(map).length){$("mp").textContent="No matching column names found. Use names like age, sex, glucose, trestbps, chol, bmi, smoker.";return}
+const rows=L.slice(1,5001).map(l=>l.split(",").map(cl)).filter(c=>c.length>1);
+DS=rows.map((c,n)=>{const v={...DEF};Object.keys(map).forEach(k=>{const x=c[map[k]];if(k=="sex"){v.sex=/^m/i.test(x)?1:/^f/i.test(x)?0:(+x>0?1:0);return}const t=/^(y|yes|true)$/i.test(x)?1:/^(n|no|false)$/i.test(x)?0:+x;if(isFinite(t)&&(t>0||!NZ.includes(k)))v[k]=t});
+if(map.glu===undefined&&fb>=0)v.glu=+c[fb]>0?130:90;return row(idc>=0?c[idc]:"Row "+(n+1),v)});
+const got=Object.keys(map).map(k=>NMS[k]),miss=Object.keys(NMS).filter(k=>!(k in map)&&!(k=="glu"&&fb>=0)).map(k=>NMS[k]);
+$("mp").innerHTML=`<b>${src}: ${DS.length} people scored.</b> Matched columns: ${got.join(", ")}. Not found, neutral default used: ${miss.join(", ")||"none"}. A column named BloodPressure is treated as the bottom number.`;flt="All";lim=25;wlRender()}
+$("f").onchange=e=>{const r=new FileReader(),f=e.target.files[0];r.onload=()=>load(r.result,f.name);r.readAsText(f)};
+$("smp").onclick=()=>{let s=11;const r=()=>(s=(s*16807)%2147483647)/2147483647,g=()=>Math.sqrt(-2*Math.log(r()+1e-9))*Math.cos(6.283*r());
+let t="id,age,sex,glucose,trestbps,diastolic,chol,bmi,smoker,exang,diabetes,hypertension\n";
+for(let i=1;i<=200;i++){const a=Math.round(25+r()*60),dm=r()<.18+a/400?1:0,ht=r()<.12+a/250?1:0;t+=["S"+String(i).padStart(3,"0"),a,r()<.5?"male":"female",Math.round(dm?135+g()*25:92+g()*10),Math.round(ht?148+g()*12:115+g()*9),Math.round(ht?93+g()*6:75+g()*6),Math.round(190+g()*35+a/3),(24+g()*4+dm*3).toFixed(1),r()<.2?1:0,r()<.1+ht*.1?1:0,dm,ht].join(",")+"\n"}
+load(t,"Sample synthetic dataset")};
+function render(){const r=calc(val());
+$("dt").innerHTML="<tr><th>Disease</th><th>Status</th><th>Risk</th><th></th><th>Main reasons</th></tr>"+r.D.map(d=>`<tr><td>${d.n}</td><td>${d.dx?'<span class="tag">Diagnosed</span>':""}</td><td>${pc(d.d)}</td><td><div class="bw"><i style="width:${d.d*100}%;background:var(--${col(d.d)})"></i></div></td><td class="w">${d.dx?"already diagnosed":d.why||"no strong factor"}</td></tr>`).join("");
+$("ov").textContent=pc(r.o);$("tr").innerHTML=`<span class="pill ${tier(r.o)}">${tier(r.o)} risk</span>`;$("ob").style.width=r.o*100+"%";$("ob").style.background=`var(--${col(r.o)})`;
+$("fx").innerHTML=`<b>How the score is made</b><br>1. Highest single disease risk: ${pc(r.mx)} (${r.top.n}) x 0.6 = ${pc(.6*r.mx)}<br>2. Weighted average of all 4 disease risks: ${pc(r.wa)} x 0.4 = ${pc(.4*r.wa)}<br>3. Several conditions together (${r.cnt}): +${pc(r.up)}<br><b>Overall = ${pc(r.o)}</b>`;
+if(base){const dl=Math.round((r.o-base.o)*100);$("fx").innerHTML+=`<br><span style="color:var(--ac)">What-if: ${base.name} scored ${pc(base.o)}, now ${pc(r.o)} (${dl>0?"+":""}${dl} points)</span>`}
+window.cur=r}
+ids.forEach(i=>$(i).addEventListener("input",render));
+document.querySelectorAll("button[data-p]").forEach(b=>b.onclick=()=>{const p=P[+b.dataset.p];ids.forEach(i=>$(i).value=p[i]);base={name:["Healthy person","Sugar + BP","Sugar + BP + heart history"][+b.dataset.p],o:calc(p).o};render()});
+$("sv").onclick=()=>{saved.push(row($("nm").value||"Saved person",val()));$("nm").value="";wlRender()};
+ids.forEach(i=>$(i).value=P[1][i]);render();wlRender();
+</script></body></html>
